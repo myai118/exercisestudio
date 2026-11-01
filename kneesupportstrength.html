@@ -785,7 +785,7 @@ function drawPauseIcon(c,W,H){
 function DemoPlayer(canvas,capEl,exId,mirror){
   this.c=canvas; this.cap=capEl; this.sc=SCENES[exId]; this.mirror=!!mirror;
   this.ctx=canvas.getContext('2d');
-  this.speed=1; this.playing=true; this.t=0; this.raf=0; this.last=0; this.lastCap=null; this.pauseIcon=false;
+  this.speed=1; this.playing=true; this.t=0; this.raf=0; this.last=0; this.lastCap=null; this.pauseIcon=false; this.clock=null;
 }
 DemoPlayer.prototype.fit=function(){
   var dpr=Math.min(window.devicePixelRatio||1,2);
@@ -807,7 +807,8 @@ DemoPlayer.prototype.start=function(){
   var self=this; this.last=performance.now(); this.frame();
   function loop(now){
     var dt=Math.min((now-self.last)/1000,.1); self.last=now;
-    if(self.playing) self.t+=dt*self.speed;
+    if(self.clock) self.t=Math.max(0,self.clock());
+    else if(self.playing) self.t+=dt*self.speed;
     self.frame();
     self.raf=requestAnimationFrame(loop);
   }
@@ -1032,6 +1033,11 @@ function legacyRig(p,sc,left){
     out.legL.ankle[1]=-.11*sign;out.legL.ankle[2]=pivot+.11+lift;
     out.legL.toe[1]=-.11*sign;out.legL.toe[2]=pivot+.11+lift+.03;
     out.legL.knee=add3(out.hipL,sub3(out.legL.ankle,out.hipL),.5);
+    // Keep the lower leg visibly rounded above the mat instead of rendering it
+    // as a flat line through the floor plane.
+    out.legR.ankle[2]=Math.max(out.legR.ankle[2],pivot+.055);
+    out.legR.toe[2]=Math.max(out.legR.toe[2],pivot+.07);
+    out.legR.knee[2]=Math.max(out.legR.knee[2],pivot+.13);
   }
   return out;
 }
@@ -2014,6 +2020,17 @@ function renderStep(){
     if(rs.resting){ sess.prev.playing = false; sess.prev.pauseIcon = true; }
     paintDots(rs.rep, rs.resting);
   }
+  // Use the exact session elapsed time for both the countdown and the 3D pose.
+  // This prevents the animation's independent RAF clock from drifting away.
+  sess.prev.clock=function(){
+    if(st.type!=='work') return 0;
+    var remaining=(sess.paused||sess.stopped)?sess.remaining:Math.max(0,sess.endAt-Date.now());
+    var used=Math.max(0,(sess.dur-remaining)/1000);
+    if(isTimed(st.ex)) return Math.min(used, Math.max(0,SCENES[sceneId].total-.001));
+    var r=repState(st.ex,used*1000);
+    return r.resting ? 0 : Math.min(r.within,r.perMs)/1000;
+  };
+  sess.prev.playing = false;
   sess.prev.start();
   updateTimerUI(sess.remaining);
   $('bPause').focus({preventScroll:true});
